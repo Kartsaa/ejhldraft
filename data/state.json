@@ -8,11 +8,12 @@
   "autopickEnabled": true,
   "autopickMode": "highest_ovr",
   "autopickPositions": [
-    "C",
-    "LW",
-    "RW",
-    "D",
-    "G"
+    "KH",
+    "VL",
+    "OL",
+    "VP",
+    "OP",
+    "MV"
   ],
   "status": "setup",
   "round": 1,
