@@ -7,7 +7,9 @@ const XLSX = require('xlsx');
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const ROOT = __dirname;
-const DATA_DIR = path.join(ROOT, 'data');
+const DATA_DIR = process.env.STATE_DIR || path.join(ROOT, 'data');
+const SEED_FILE = path.join(ROOT, 'data', 'state.json');
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -28,7 +30,19 @@ function defaultState() {
     practiceDefaults:{rounds:3,teams:4,timerSeconds:30}
   };
 }
-let state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE,'utf8')) : defaultState();
+function validState(x){return x && typeof x==='object' && Array.isArray(x.teams) && Array.isArray(x.players) && Array.isArray(x.picks) && Number.isInteger(x.teamCount) && x.teamCount>=2 && x.teams.length>=x.teamCount && Number.isInteger(x.rounds) && x.rounds>0 && ['setup','live','paused','complete'].includes(x.status);}
+function loadState(file){const x=JSON.parse(fs.readFileSync(file,'utf8'));if(!validState(x))throw new Error('Virheellinen state.json: '+file);return x;}
+// First boot on a new persistent disk: seed from the verified repository snapshot.
+// Never silently start an empty draft when the persistent file is missing after initialization.
+const MARKER=path.join(DATA_DIR,'.nhl27-initialized');
+let state;
+if(fs.existsSync(STATE_FILE)) state=loadState(STATE_FILE);
+else if(fs.existsSync(MARKER)) throw new Error('Persistent state.json missing! Refusing to reset draft.');
+else if(fs.existsSync(SEED_FILE)) {state=loadState(SEED_FILE);fs.writeFileSync(STATE_FILE,JSON.stringify(state,null,2),{flag:'wx'});fs.writeFileSync(MARKER,new Date().toISOString());}
+else if(process.env.STATE_DIR) throw new Error('No seed state.json available; refusing to create empty draft.');
+else state=defaultState();
+if(state.status==='live') {state.status='paused';state.pausedRemaining=state.timerSeconds;state.turnStartedAt=null;} // Avoid a silent autopick during restarts.
+
 if (!state.teams || !state.teams.length) state.teams=makeTeams(32);
 if (!Number.isFinite(state.salaryCapCeiling)) state.salaryCapCeiling=95500000;
 state.players=(state.players||[]).map(p=>({...p,salary:Number(p.salary)||0}));
@@ -36,7 +50,21 @@ if (!state.commissionerPassword) state.commissionerPassword=DEFAULT_COMMISSIONER
 const sessions = new Map();
 const sseClients = new Set();
 
-function save(){fs.writeFileSync(STATE_FILE, JSON.stringify(state,null,2));}
+function writeAtomic(file,contents){const tmp=file+'.'+process.pid+'.tmp';try{fs.writeFileSync(tmp,contents,{mode:0o600});fs.renameSync(tmp,file);}finally{if(fs.existsSync(tmp))fs.unlinkSync(tmp);}}
+function backupSnapshot(label='auto'){
+ fs.mkdirSync(BACKUP_DIR,{recursive:true});
+ const stamp=new Date().toISOString().replace(/[:.]/g,'-');
+ const file=path.join(BACKUP_DIR,stamp+'-'+crypto.randomBytes(3).toString('hex')+'-'+label+'.json');
+ fs.writeFileSync(file,JSON.stringify(state,null,2),{flag:'wx',mode:0o600});
+ const files=fs.readdirSync(BACKUP_DIR).filter(x=>x.endsWith('.json')).sort().reverse();
+ for(const old of files.slice(100))fs.unlinkSync(path.join(BACKUP_DIR,old));
+}
+function save(){writeAtomic(STATE_FILE,JSON.stringify(state,null,2));backupSnapshot();}
+const DISCORD_URL=process.env.DISCORD_WEBHOOK_URL||'';
+let ROLE_IDS={};try{ROLE_IDS=JSON.parse(process.env.DISCORD_ROLE_IDS||'{}')}catch(e){console.error('Invalid DISCORD_ROLE_IDS JSON:',e.message)}
+function discord(message,teamId){if(!DISCORD_URL)return;const role=teamId&&String(ROLE_IDS[teamId]||'');const mention=/^\d{15,22}$/.test(role)?`<@&${role}> `:'';const allowed_mentions=mention?{parse:[],roles:[role]}:{parse:[]};fetch(DISCORD_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:(mention+message).slice(0,1900),allowed_mentions})}).then(r=>{if(!r.ok)console.error('Discord webhook HTTP',r.status)}).catch(e=>console.error('Discord webhook error:',e.message));}
+function announcePick(){const p=state.picks.at(-1);if(!p||state.mode==='practice')return;discord(`${p.automatic?'🤖 Automaattinen varaus':'🏒 Uusi varaus'} #${p.pickNumber}: ${p.teamName} — ${p.playerName} (${p.position}, KOK ${p.ovr})`);if(state.status==='complete')discord('🏁 Draft on päättynyt!');else if(state.status==='live'){const t=currentTeam();if(t)discord(`⏰ Varausvuoro alkaa: ${t.name} — kierros ${state.round}`,t.id);}}
+
 function publicState(){
   let remaining=null;
   if(state.status==='live' && state.turnStartedAt) remaining=Math.max(0,state.timerSeconds-Math.floor((Date.now()-state.turnStartedAt)/1000));
@@ -74,7 +102,7 @@ function currentTeam(){return state.teams.find(t=>t.id===state.currentTeamId);}
 function chooseAutopick(){let available=state.players.filter(p=>!draftedIds().has(p.id));if(!available.length)return null;available=available.filter(p=>fitsCap(p,state.currentTeamId));if(!available.length)return null;if(state.autopickMode==='positions'){const allowed=new Set(state.autopickPositions);const preferred=available.filter(p=>allowed.has(p.position));if(preferred.length)available=preferred;}return available.sort((a,b)=>(b.ovr-a.ovr)||a.name.localeCompare(b.name))[0];}
 function advance(){const total=state.rounds*state.teamCount;const pickNumber=state.picks.length;if(pickNumber>=total){state.status='complete';state.turnStartedAt=null;state.pausedRemaining=null;return;}state.pickInRound++;if(state.pickInRound>state.teamCount){state.round++;state.pickInRound=1;}state.currentTeamId=orderForRound(state.round)[state.pickInRound-1];state.turnStartedAt=Date.now();state.pausedRemaining=null;}
 function recordPick(player,automatic=false){if(!player)throw new Error('No available player.');if(draftedIds().has(player.id))throw new Error('Pelaaja on jo varattu.');if(!fitsCap(player,state.currentTeamId))throw new Error('Palkkakatto ylittyisi tällä varauksella.');const team=currentTeam();if(!team)throw new Error('Current team not found.');state.picks.push({pickNumber:state.picks.length+1,round:state.round,pickInRound:state.pickInRound,teamId:team.id,teamName:team.name,participant:team.participant,playerId:player.id,playerName:player.name,position:player.position,ovr:player.ovr,height:player.height,weight:player.weight,hand:player.hand,xfactor:player.xfactor,salary:player.salary||0,automatic,timestamp:new Date().toISOString()});advance();}
-function maybeAutopick(){if(state.status!=='live'||!state.autopickEnabled||!state.turnStartedAt)return;if(Date.now()-state.turnStartedAt<state.timerSeconds*1000)return;const p=chooseAutopick();if(p){recordPick(p,true);save();broadcast();}else{state.status='paused';state.pausedRemaining=0;state.turnStartedAt=null;save();broadcast();}}
+function maybeAutopick(){if(state.status!=='live'||!state.autopickEnabled||!state.turnStartedAt)return;if(Date.now()-state.turnStartedAt<state.timerSeconds*1000)return;const p=chooseAutopick();if(p){recordPick(p,true);save();broadcast();announcePick();}else{state.status='paused';state.pausedRemaining=0;state.turnStartedAt=null;save();broadcast();}}
 setInterval(maybeAutopick,250);
 function csvEscape(v){const s=String(v??'');return /[",\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;}
 function exportCSV(){const h=['Pick','Round','Pick In Round','Team','Participant','Player','Position','OVR','Height','Weight','Hand','Kyvyt','Palkka','Automaattinen varaus','Timestamp'];return [h,...state.picks.map(p=>[p.pickNumber,p.round,p.pickInRound,p.teamName,p.participant,p.playerName,p.position,p.ovr,p.height,p.weight,p.hand,p.xfactor,p.salary||0,p.automatic?'Yes':'No',p.timestamp])].map(r=>r.map(csvEscape).join(',')).join('\r\n');}
@@ -95,6 +123,24 @@ function resetToReal(){
 }
 async function route(req,res){
   const url=new URL(req.url,`http://${req.headers.host||'localhost'}`);
+  if(req.method==='GET'&&url.pathname==='/api/backup/download'){
+    if(!requireAuth(req,res,'commissioner'))return;
+    res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Content-Disposition':'attachment; filename="nhl27-varmuuskopio.json"','Cache-Control':'no-store'});
+    return res.end(JSON.stringify(state,null,2));
+  }
+  if(req.method==='POST'&&url.pathname==='/api/backup/restore'){
+    if(!requireAuth(req,res,'commissioner'))return;
+    try{
+      const b=await body(req);
+      if(b.confirm!=='PALAUTA')return json(res,400,{error:'Palautus vaatii vahvistuksen PALAUTA.'});
+      if(!validState(b.state))return json(res,400,{error:'Varmuuskopion rakenne ei kelpaa.'});
+      if(state.status==='live')return json(res,409,{error:'Keskeytä draft ennen palautusta.'});
+      backupSnapshot('before-restore');
+      state=b.state;
+      if(state.status==='live'){state.status='paused';state.pausedRemaining=state.timerSeconds;state.turnStartedAt=null;}
+      save();broadcast();return json(res,200,{ok:true,teams:state.teamCount,picks:state.picks.length});
+    }catch(e){return json(res,400,{error:e.message});}
+  }
   if(req.method==='GET'&&url.pathname==='/api/state')return json(res,200,publicState());
   if(req.method==='GET'&&url.pathname==='/api/events'){res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive','Access-Control-Allow-Origin':'*'});res.write(`data: ${JSON.stringify(publicState())}\n\n`);sseClients.add(res);req.on('close',()=>sseClients.delete(res));return;}
   if(req.method==='GET'&&url.pathname==='/api/export.csv'){res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="nhl27-draft-results.csv"'});return res.end(exportCSV());}
@@ -113,19 +159,19 @@ async function route(req,res){
     if(!requireAuth(req,res,'commissioner'))return;try{const b=await body(req);if(b.draftName!==undefined)state.draftName=String(b.draftName);if(b.salaryCapCeiling!==undefined){const cap=Number(b.salaryCapCeiling);if(!Number.isSafeInteger(cap)||cap<0)throw new Error('Virheellinen palkkakatto.');if(state.picks.some(p=>teamPayroll(p.teamId)>cap))throw new Error('Nykyinen joukkue ylittää uuden palkkakaton.');state.salaryCapCeiling=cap;}if(b.timerSeconds!==undefined)state.timerSeconds=Math.max(5,Number(b.timerSeconds));if(b.autopickEnabled!==undefined)state.autopickEnabled=!!b.autopickEnabled;if(b.autopickMode!==undefined)state.autopickMode=b.autopickMode;if(Array.isArray(b.autopickPositions))state.autopickPositions=b.autopickPositions;if(b.commissionerPassword)state.commissionerPassword=String(b.commissionerPassword);if(Array.isArray(b.teams)){b.teams.slice(0,32).forEach((t,i)=>{if(t.name!==undefined)state.teams[i].name=String(t.name);if(t.participant!==undefined)state.teams[i].participant=String(t.participant);if(t.code!==undefined&&String(t.code).trim())state.teams[i].code=String(t.code);});}save();broadcast();return json(res,200,{ok:true})}catch(e){return json(res,400,{error:e.message})}
   }
   if(req.method==='POST'&&url.pathname==='/api/draft/start'){
-    if(!requireAuth(req,res,'commissioner'))return;if(!state.players.length)return json(res,400,{error:'Import players first.'});if(state.mode==='practice')resetToReal();if(!Number.isInteger(state.teamCount)||state.teamCount<2||state.teamCount>32||state.teams.length<state.teamCount)return json(res,400,{error:'Tarkista joukkuemäärä ja joukkueiden tiedot.'});state.status='live';state.mode='real';state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=Date.now();state.pausedRemaining=null;save();broadcast();return json(res,200,{ok:true});
+    if(!requireAuth(req,res,'commissioner'))return;if(!state.players.length)return json(res,400,{error:'Import players first.'});if(state.mode==='practice')resetToReal();if(!Number.isInteger(state.teamCount)||state.teamCount<2||state.teamCount>32||state.teams.length<state.teamCount)return json(res,400,{error:'Tarkista joukkuemäärä ja joukkueiden tiedot.'});state.status='live';state.mode='real';state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=Date.now();state.pausedRemaining=null;save();broadcast();discord('🚀 Draft alkaa!');discord(`⏰ Varausvuoro alkaa: ${currentTeam()?.name||'Joukkue 1'}`,state.currentTeamId);return json(res,200,{ok:true});
   }
   if(req.method==='POST'&&url.pathname==='/api/draft/pick'){
-    const s=requireAuth(req,res,'team');if(!s)return;try{if(state.status!=='live')throw new Error('Draft is not live.');if(s.role==='team'&&s.teamId!==state.currentTeamId)throw new Error('It is not your team\'s turn.');const b=await body(req);const p=state.players.find(x=>x.id===String(b.playerId));if(!p)throw new Error('Player not found.');recordPick(p,false);save();broadcast();return json(res,200,{ok:true})}catch(e){return json(res,400,{error:e.message})}
+    const s=requireAuth(req,res,'team');if(!s)return;try{if(state.status!=='live')throw new Error('Draft is not live.');if(s.role==='team'&&s.teamId!==state.currentTeamId)throw new Error('It is not your team\'s turn.');const b=await body(req);const p=state.players.find(x=>x.id===String(b.playerId));if(!p)throw new Error('Player not found.');recordPick(p,false);save();broadcast();announcePick();return json(res,200,{ok:true})}catch(e){return json(res,400,{error:e.message})}
   }
   if(req.method==='POST'&&url.pathname==='/api/draft/pause'){
-    if(!requireAuth(req,res,'commissioner'))return;if(state.status==='live'){state.pausedRemaining=state.turnStartedAt?Math.max(0,state.timerSeconds-Math.floor((Date.now()-state.turnStartedAt)/1000)):state.timerSeconds;state.status='paused';state.turnStartedAt=null;}else if(state.status==='paused'){state.status='live';state.turnStartedAt=Date.now()-(state.timerSeconds-state.pausedRemaining)*1000;state.pausedRemaining=null;}save();broadcast();return json(res,200,{ok:true});
+    if(!requireAuth(req,res,'commissioner'))return;if(state.status==='live'){state.pausedRemaining=state.turnStartedAt?Math.max(0,state.timerSeconds-Math.floor((Date.now()-state.turnStartedAt)/1000)):state.timerSeconds;state.status='paused';state.turnStartedAt=null;}else if(state.status==='paused'){state.status='live';state.turnStartedAt=Date.now()-(state.timerSeconds-state.pausedRemaining)*1000;state.pausedRemaining=null;}save();broadcast();if(state.mode==='real')discord(state.status==='paused'?'⏸️ Draft keskeytetty.':'▶️ Draft jatkuu.');return json(res,200,{ok:true});
   }
   if(req.method==='POST'&&url.pathname==='/api/draft/reset'){if(!requireAuth(req,res,'commissioner'))return;state.status='setup';state.mode='real';state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=null;state.pausedRemaining=null;save();broadcast();return json(res,200,{ok:true});}
   if(req.method==='POST'&&url.pathname==='/api/draft/undo'){
     if(!requireAuth(req,res,'commissioner'))return;if(!state.picks.length)return json(res,400,{error:'Nothing to undo.'});state.picks.pop();const last=state.picks[state.picks.length-1];if(!last){state.round=1;state.pickInRound=1;state.currentTeamId=1;}else{state.round=last.round;state.pickInRound=last.pickInRound;state.currentTeamId=last.teamId;advance();}state.status='live';state.turnStartedAt=Date.now();state.pausedRemaining=null;save();broadcast();return json(res,200,{ok:true});
   }
-  if(req.method==='POST'&&url.pathname==='/api/draft/force-autopick'){if(!requireAuth(req,res,'commissioner'))return;if(state.status!=='live')return json(res,400,{error:'Draft is not live.'});const p=chooseAutopick();if(!p)return json(res,400,{error:'Ei palkkakattoon mahtuvia vapaita pelaajia.'});recordPick(p,true);save();broadcast();return json(res,200,{ok:true});}
+  if(req.method==='POST'&&url.pathname==='/api/draft/force-autopick'){if(!requireAuth(req,res,'commissioner'))return;if(state.status!=='live')return json(res,400,{error:'Draft is not live.'});const p=chooseAutopick();if(!p)return json(res,400,{error:'Ei palkkakattoon mahtuvia vapaita pelaajia.'});recordPick(p,true);save();broadcast();announcePick();return json(res,200,{ok:true});}
   if(req.method==='POST'&&url.pathname==='/api/practice/start'){
     if(!requireAuth(req,res,'commissioner'))return;const b=await body(req);const teams=Math.max(2,Math.min(32,Number(b.teams||4)));const rounds=Math.max(1,Math.min(32,Number(b.rounds||3)));if(state.mode!=='practice'){state.realDraftBackup={teams:JSON.parse(JSON.stringify(state.teams)),teamCount:state.teamCount,rounds:state.rounds,timerSeconds:state.timerSeconds,picks:JSON.parse(JSON.stringify(state.picks))};}state.mode='practice';state.rounds=rounds;state.teamCount=teams;state.teams=state.realDraftBackup.teams.slice(0,teams).map(t=>({...t}));state.timerSeconds=Math.max(5,Number(b.timerSeconds||30));state.status='live';state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=Date.now();state.pausedRemaining=null;save();broadcast();return json(res,200,{ok:true});
   }
