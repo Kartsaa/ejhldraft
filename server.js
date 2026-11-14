@@ -61,13 +61,13 @@ function backupSnapshot(label='auto'){
 }
 function save(){writeAtomic(STATE_FILE,JSON.stringify(state,null,2));backupSnapshot();}
 const DISCORD_URL=process.env.DISCORD_WEBHOOK_URL||'';
-let ROLE_IDS={};try{ROLE_IDS=JSON.parse(process.env.DISCORD_ROLE_IDS||'{}')}catch(e){console.error('Invalid DISCORD_ROLE_IDS JSON:',e.message)}
+let USER_IDS={};try{USER_IDS=JSON.parse(process.env.DISCORD_USER_IDS||'{}');if(!USER_IDS||typeof USER_IDS!=='object'||Array.isArray(USER_IDS))throw new Error('Expected a JSON object')}catch(e){console.error('Invalid DISCORD_USER_IDS JSON:',e.message);USER_IDS={}}
 // Discord: one announcement for the next three picks, respecting snake order.
 function discord(message,teamIds=[]){
  if(!DISCORD_URL)return;
- const ids=(Array.isArray(teamIds)?teamIds:[teamIds]).map(id=>String(ROLE_IDS[id]||'')).filter(id=>/^\d{15,22}$/.test(id));
+ const ids=(Array.isArray(teamIds)?teamIds:[teamIds]).map(id=>String(USER_IDS[id]||'')).filter(id=>/^\d{15,22}$/.test(id));
  const unique=[...new Set(ids)];
- const allowed_mentions={parse:[],roles:unique};
+ const allowed_mentions={parse:[],users:unique};
  fetch(DISCORD_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:message.slice(0,1900),allowed_mentions})})
  .then(r=>{if(!r.ok)console.error('Discord webhook HTTP',r.status)})
  .catch(e=>console.error('Discord webhook error:',e.message));
@@ -89,14 +89,14 @@ function announceUpcoming(){
  if(state.mode==='practice'||state.status!=='live')return;
  const upcoming=upcomingPicks(3);
  if(!upcoming.length)return;
- const roles=[];
+ const users=[];
  const lines=upcoming.map((p,i)=>{
-  const role=String(ROLE_IDS[p.team.id]||'');
-  const mention=/^\d{15,22}$/.test(role)?` <@&${role}>`:'';
-  if(mention)roles.push(p.team.id);
+  const user=String(USER_IDS[p.team.id]||'');
+  const mention=/^\d{15,22}$/.test(user)?` <@${user}>`:'';
+  if(mention)users.push(p.team.id);
   return `${i===0?'🟢 Nyt':i===1?'🟡 Seuraavana':'🟠 Kolmantena'}: #${p.number} (kierros ${p.round}) — ${p.team.name}${mention}`;
  });
- discord(`📣 **Seuraavat 3 varausvuoroa**\n${lines.join('\n')}`,roles);
+ discord(`📣 **Seuraavat 3 varausvuoroa**\n${lines.join('\n')}`,users);
 }
 function announcePick(){
  const p=state.picks.at(-1);
