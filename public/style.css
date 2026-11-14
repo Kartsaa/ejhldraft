@@ -1,0 +1,76 @@
+*{box-sizing:border-box}body{margin:0;background:#0d1117;color:#e6edf3;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}button,.button,input,select{font:inherit}button,.button{background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:8px;padding:9px 13px;cursor:pointer;text-decoration:none;display:inline-block}button:hover,.button:hover{background:#30363d}.primary{background:#238636;border-color:#2ea043}.danger{background:#b62324;border-color:#da3633}.hidden{display:none!important}header{display:flex;justify-content:space-between;gap:20px;align-items:center;padding:18px 24px;border-bottom:1px solid #21262d;background:#161b22;position:sticky;top:0;z-index:5}h1,h2,h3{margin:0 0 6px}.sub,.muted{color:#8b949e;font-size:13px}.header-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.pill{border:1px solid #30363d;border-radius:999px;padding:7px 10px;font-size:12px;color:#8b949e}.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:16px;box-shadow:0 4px 18px #0003}main{max-width:1500px;margin:20px auto;padding:0 16px}.hero{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}.eyebrow{font-size:12px;font-weight:700;letter-spacing:.12em;color:#58a6ff}.timer{font-variant-numeric:tabular-nums;font-size:52px;font-weight:800;min-width:150px;text-align:right}.layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px}.section-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px}.filters{display:flex;gap:6px;flex-wrap:wrap}.filters input,.filters select,label input,label select{background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:7px;padding:8px;min-width:90px}.filters #search{min-width:180px}.table-wrap{overflow:auto;max-height:620px}table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:9px 8px;border-bottom:1px solid #21262d;text-align:left;white-space:nowrap}th{position:sticky;top:0;background:#161b22;color:#8b949e;font-size:12px;cursor:pointer}td:nth-child(3){font-weight:800}.pickbtn{padding:5px 9px;font-size:12px}.onclock{margin-bottom:16px}.bigteam{font-size:25px;font-weight:800;margin-top:10px}.mini{margin-top:14px;color:#8b949e}.rosters{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.roster{border:1px solid #30363d;border-radius:9px;padding:10px}.roster h4{margin:0 0 8px}.roster ol{margin:0;padding-left:22px;color:#c9d1d9}.pickrow{padding:7px 0;border-bottom:1px solid #21262d;font-size:13px}.board{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;max-height:300px;overflow:auto}.slot{padding:7px;border:1px solid #30363d;border-radius:7px;font-size:12px}.slot.active{outline:2px solid #58a6ff}.modal{position:fixed;inset:0;background:#0009;z-index:20;display:flex;align-items:flex-start;justify-content:center;padding:30px;overflow:auto}.modal.hidden{display:none}.modal-box{background:#161b22;border:1px solid #30363d;border-radius:12px;width:min(1050px,100%);padding:20px}.modal-head{display:flex;justify-content:space-between;margin-bottom:16px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.grid2 label,.grid3 label,.modal-box>label{display:flex;flex-direction:column;gap:5px;color:#8b949e;font-size:13px}.team-inputs{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;max-height:350px;overflow:auto;margin-bottom:16px}.team-input{width:100%}.admin-actions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}hr{border:0;border-top:1px solid #30363d;margin:20px 0}.tabs{display:flex;gap:6px;margin-bottom:15px}.tabs button.active{outline:2px solid #58a6ff}.modal-box label{margin-bottom:10px}.modal-box label input,.modal-box label select{width:100%}@media(max-width:1000px){.layout{grid-template-columns:1fr}.rosters{grid-template-columns:repeat(2,1fr)}}@media(max-width:650px){header{align-items:flex-start;flex-direction:column}.hero{align-items:flex-start;flex-direction:column}.timer{text-align:left;font-size:42px}.grid2,.grid3,.team-inputs{grid-template-columns:1fr}.rosters{grid-template-columns:1fr}.filters>*{width:100%}.filters #search{width:100%}}
+
+/* X-Factor icons: shown in the player pool. Hover for full ability name. */
+.xfactor-list{display:inline-flex;align-items:center;flex-wrap:wrap;gap:5px;max-width:280px}
+.xfactor-item{display:inline-flex;align-items:center;justify-content:center;min-width:35px;min-height:35px;border-radius:7px;background:#252d39;border:1px solid #495366;padding:2px}
+.xfactor-icon{width:32px;height:32px;object-fit:contain;display:block}
+.xfactor-icon[hidden],.xfactor-fallback[hidden]{display:none}
+.xfactor-fallback,.xfactor-unknown{font-size:11px;white-space:normal;max-width:120px;color:#cbd5e1}
+.xfactor-unknown{border:1px dashed #6b7280;border-radius:5px;padding:4px 6px}
+
+.salary-summary{margin:8px 0 12px;padding:9px;border-radius:8px;background:rgba(110,170,134,.12);font-size:.9rem;line-height:1.6} .table-wrap{overflow-x:auto} .players table{min-width:900px}
+
+/* === Mobiilioptimointi === */
+@media(max-width:700px){
+  body{font-size:14px}
+  main{margin:10px auto;padding:0 10px}
+  header{padding:12px 14px;gap:10px}
+  header h1{font-size:22px}
+  .header-actions{width:100%;gap:6px}
+  .header-actions .button,.header-actions button{flex:1 1 auto;text-align:center;padding:8px 9px;font-size:12px}
+  .pill{width:100%;text-align:center}
+  .card{padding:12px;border-radius:10px}
+  .hero{gap:8px}
+  .hero h2{font-size:20px}
+  .timer{font-size:44px;min-width:0;width:100%;text-align:left}
+  .section-head{align-items:flex-start;flex-direction:column}
+  .players .section-head>div{width:100%}
+  .filters{display:grid;grid-template-columns:1fr 1fr;width:100%}
+  .filters #search{grid-column:1/-1;min-width:0}
+  .filters input,.filters select{width:100%;min-width:0}
+
+  /* Pelaajataulukko muuttuu korteiksi puhelimella */
+  .players .table-wrap{max-height:none;overflow:visible}
+  .players table,.players tbody,.players tr,.players td{display:block;width:100%;min-width:0}
+  .players thead{display:none}
+  .players tbody{display:grid;gap:9px}
+  .players tr{position:relative;padding:10px 10px 8px;border:1px solid #30363d;border-radius:10px;background:#0d1117}
+  .players td{border:0;padding:4px 0;white-space:normal;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+  .players td::before{color:#8b949e;font-size:12px;min-width:92px;flex:0 0 92px}
+  .players td:nth-child(1){font-size:17px;font-weight:800;padding-bottom:7px}
+  .players td:nth-child(1)::before{content:'Nimi'}
+  .players td:nth-child(2)::before{content:'Pelipaikka'}
+  .players td:nth-child(3)::before{content:'KOK'}
+  .players td:nth-child(4)::before{content:'Pituus'}
+  .players td:nth-child(5)::before{content:'Paino'}
+  .players td:nth-child(6)::before{content:'Kätisyys'}
+  .players td:nth-child(7)::before{content:'Kyvyt'}
+  .players td:nth-child(8)::before{content:'Palkka'}
+  .players td:nth-child(9){padding-top:9px}
+  .players td:nth-child(9)::before{display:none}
+  .players td:nth-child(9) .pickbtn{width:100%;padding:10px;font-size:14px}
+  .xfactor-list{max-width:220px;justify-content:flex-end}
+  .xfactor-item{min-width:32px;min-height:32px}
+  .xfactor-icon{width:29px;height:29px}
+
+  aside{display:grid;gap:10px}
+  aside .card{margin:0}
+  .board{max-height:260px;grid-template-columns:1fr 1fr}
+  .slot{font-size:11px}
+  .roster{padding:10px}
+  .roster ol{font-size:13px}
+  .salary-summary{font-size:13px}
+
+  .modal{padding:10px}
+  .modal-box{padding:14px;width:100%;border-radius:10px}
+  .modal-head h2{font-size:20px}
+  .team-inputs{max-height:none}
+  .admin-actions button{width:100%}
+}
+
+@media(max-width:380px){
+  .filters{grid-template-columns:1fr}
+  .filters #search{grid-column:auto}
+  .board{grid-template-columns:1fr}
+  .players td::before{min-width:78px;flex-basis:78px}
+}
