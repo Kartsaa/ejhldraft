@@ -31,7 +31,7 @@ function defaultState() {
 let state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE,'utf8')) : defaultState();
 if (!state.teams || !state.teams.length) state.teams=makeTeams(32);
 if (!Number.isFinite(state.salaryCapCeiling)) state.salaryCapCeiling=95500000;
-state.players=(state.players||[]).map(p=>({...p,salary:Number(p.salary)||0,contractDuration:Number(p.contractDuration)||0}));
+state.players=(state.players||[]).map(p=>({...p,salary:Number(p.salary)||0}));
 if (!state.commissionerPassword) state.commissionerPassword=DEFAULT_COMMISSIONER_PASSWORD;
 const sessions = new Map();
 const sseClients = new Set();
@@ -41,7 +41,7 @@ function publicState(){
   let remaining=null;
   if(state.status==='live' && state.turnStartedAt) remaining=Math.max(0,state.timerSeconds-Math.floor((Date.now()-state.turnStartedAt)/1000));
   if(state.status==='paused' && Number.isFinite(state.pausedRemaining)) remaining=state.pausedRemaining;
-  return {...state, commissionerPassword:undefined, teams:state.teams.map(t=>({...t,code:undefined})),timerRemaining:remaining};
+  return {...state, commissionerPassword:undefined, realDraftBackup:undefined, teams:state.teams.map(t=>({...t,code:undefined})),timerRemaining:remaining};
 }
 function broadcast(){const msg=`data: ${JSON.stringify(publicState())}\n\n`; for(const res of sseClients){try{res.write(msg)}catch{}}}
 function json(res,status,obj){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Access-Control-Allow-Origin':'*'});res.end(JSON.stringify(obj));}
@@ -63,10 +63,7 @@ function parseSalary(value){
 function normalizePlayer(p,i){
   const position=String(p.Pelipaikka??p.Position??p.position??p.Pos??'').trim().toUpperCase();
   const rawSalary=p.Palkka??p.Salary??p['Cap Hit']??p.CapHit??p.salary??'';
-  const rawContract=p['Sopimuksen kesto']??p['Sopimuksen kesto (vuotta)']??p.Sopimus??p.ContractLength??p.contractLength??p.contractDuration??p['Contract Term']??p['Contract Length']??'';
-  const contractDuration=rawContract===''?0:Number(String(rawContract).replace(',','.').replace(/\s*vuotta?$/i,''));
-  if(rawContract!==''&&(!Number.isFinite(contractDuration)||contractDuration<0))throw new Error('Virheellinen sopimuksen kesto pelaajalla '+(p.Nimi??p.Name??''));
-  return {id:String(p.ID??p.Id??p.id??`p-${i+1}`),name:String(p.Nimi??p.Name??p.name??p.Player??p.player??'').trim(),position,ovr:Number(p.KOK??p.OVR??p.Ovr??p.ovr??0),height:String(p.Pituus??p.Height??p.height??'').trim(),weight:String(p.Paino??p.Weight??p.weight??'').trim(),hand:String(p['Kätisyys']??p.Katisyys??p.Hand??p.Handedness??p.handedness??p.hand??'').trim().toUpperCase(),xfactor:String(p.Kyvyt??p.XFactor??p['X-Factor']??p.xfactor??p.Ability??p['X Factor']??'').trim(),salary:parseSalary(rawSalary),contractDuration};
+  return {id:String(p.ID??p.Id??p.id??`p-${i+1}`),name:String(p.Nimi??p.Name??p.name??p.Player??p.player??'').trim(),position,ovr:Number(p.KOK??p.OVR??p.Ovr??p.ovr??0),height:String(p.Pituus??p.Height??p.height??'').trim(),weight:String(p.Paino??p.Weight??p.weight??'').trim(),hand:String(p['Kätisyys']??p.Katisyys??p.Hand??p.Handedness??p.handedness??p.hand??'').trim().toUpperCase(),xfactor:String(p.Kyvyt??p.XFactor??p['X-Factor']??p.xfactor??p.Ability??p['X Factor']??'').trim(),salary:parseSalary(rawSalary)};
 }
 function teamPayroll(teamId){return state.picks.filter(p=>p.teamId===teamId).reduce((sum,p)=>sum+(Number(p.salary)||0),0);}
 function fitsCap(player,teamId){return teamPayroll(teamId)+(Number(player.salary)||0)<=state.salaryCapCeiling;}
@@ -74,22 +71,28 @@ function importRows(rows){const players=rows.map(normalizePlayer).filter(p=>p.na
 function draftedIds(){return new Set(state.picks.map(p=>p.playerId));}
 function orderForRound(round,teamCount=state.teamCount){const a=Array.from({length:teamCount},(_,i)=>i+1);return round%2===1?a:a.reverse();}
 function currentTeam(){return state.teams.find(t=>t.id===state.currentTeamId);}
-function positionGroup(position){const p=String(position||'').trim().toUpperCase();if(['C','LW','RW','OL','KH','VL','F','FORWARD'].includes(p))return 'forward';if(['D','LD','RD','OP','VP','DEFENSE','DEFENCE'].includes(p))return 'defense';if(['G','MV','GK','GOALIE'].includes(p))return 'goalie';return 'other';}
-const ROSTER_TARGETS={forward:12,defense:6,goalie:2};
-function teamGroupCount(teamId,group){return state.picks.filter(p=>p.teamId===teamId&&positionGroup(p.position)===group).length;}
-function chooseAutopick(){let available=state.players.filter(p=>!draftedIds().has(p.id)&&fitsCap(p,state.currentTeamId));if(!available.length)return null;
-  // Fill minimum roster groups first. Once a group reaches its target, avoid it while another target group still needs players.
-  const needed=Object.keys(ROSTER_TARGETS).filter(g=>teamGroupCount(state.currentTeamId,g)<ROSTER_TARGETS[g]);
-  if(needed.length){const balanced=available.filter(p=>needed.includes(positionGroup(p.position)));if(balanced.length)available=balanced;}
-  if(state.autopickMode==='positions'){const allowed=new Set(state.autopickPositions);const preferred=available.filter(p=>allowed.has(p.position));if(preferred.length)available=preferred;}return available.sort((a,b)=>(b.ovr-a.ovr)||a.name.localeCompare(b.name))[0];}
+function chooseAutopick(){let available=state.players.filter(p=>!draftedIds().has(p.id));if(!available.length)return null;available=available.filter(p=>fitsCap(p,state.currentTeamId));if(!available.length)return null;if(state.autopickMode==='positions'){const allowed=new Set(state.autopickPositions);const preferred=available.filter(p=>allowed.has(p.position));if(preferred.length)available=preferred;}return available.sort((a,b)=>(b.ovr-a.ovr)||a.name.localeCompare(b.name))[0];}
 function advance(){const total=state.rounds*state.teamCount;const pickNumber=state.picks.length;if(pickNumber>=total){state.status='complete';state.turnStartedAt=null;state.pausedRemaining=null;return;}state.pickInRound++;if(state.pickInRound>state.teamCount){state.round++;state.pickInRound=1;}state.currentTeamId=orderForRound(state.round)[state.pickInRound-1];state.turnStartedAt=Date.now();state.pausedRemaining=null;}
-function recordPick(player,automatic=false){if(!player)throw new Error('No available player.');if(draftedIds().has(player.id))throw new Error('Pelaaja on jo varattu.');if(!fitsCap(player,state.currentTeamId))throw new Error('Palkkakatto ylittyisi tällä varauksella.');const team=currentTeam();if(!team)throw new Error('Current team not found.');state.picks.push({pickNumber:state.picks.length+1,round:state.round,pickInRound:state.pickInRound,teamId:team.id,teamName:team.name,participant:team.participant,playerId:player.id,playerName:player.name,position:player.position,ovr:player.ovr,height:player.height,weight:player.weight,hand:player.hand,xfactor:player.xfactor,salary:player.salary||0,contractDuration:player.contractDuration||0,automatic,timestamp:new Date().toISOString()});advance();}
+function recordPick(player,automatic=false){if(!player)throw new Error('No available player.');if(draftedIds().has(player.id))throw new Error('Pelaaja on jo varattu.');if(!fitsCap(player,state.currentTeamId))throw new Error('Palkkakatto ylittyisi tällä varauksella.');const team=currentTeam();if(!team)throw new Error('Current team not found.');state.picks.push({pickNumber:state.picks.length+1,round:state.round,pickInRound:state.pickInRound,teamId:team.id,teamName:team.name,participant:team.participant,playerId:player.id,playerName:player.name,position:player.position,ovr:player.ovr,height:player.height,weight:player.weight,hand:player.hand,xfactor:player.xfactor,salary:player.salary||0,automatic,timestamp:new Date().toISOString()});advance();}
 function maybeAutopick(){if(state.status!=='live'||!state.autopickEnabled||!state.turnStartedAt)return;if(Date.now()-state.turnStartedAt<state.timerSeconds*1000)return;const p=chooseAutopick();if(p){recordPick(p,true);save();broadcast();}else{state.status='paused';state.pausedRemaining=0;state.turnStartedAt=null;save();broadcast();}}
 setInterval(maybeAutopick,250);
 function csvEscape(v){const s=String(v??'');return /[",\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;}
-function exportCSV(){const h=['Pick','Round','Pick In Round','Team','Participant','Player','Position','OVR','Height','Weight','Hand','Kyvyt','Palkka','Sopimuksen kesto','Automaattinen varaus','Timestamp'];return [h,...state.picks.map(p=>[p.pickNumber,p.round,p.pickInRound,p.teamName,p.participant,p.playerName,p.position,p.ovr,p.height,p.weight,p.hand,p.xfactor,p.salary||0,p.contractDuration||0,p.automatic?'Kyllä':'Ei',p.timestamp])].map(r=>r.map(csvEscape).join(',')).join('\r\n');}
-function exportRosters(){const h=['Team','Participant','Pick','Player','Position','OVR','Height','Weight','Hand','Kyvyt','Palkka','Sopimuksen kesto','Automaattinen varaus'];const rows=[];for(const t of state.teams)for(const p of state.picks.filter(x=>x.teamId===t.id))rows.push([t.name,t.participant,p.pickNumber,p.playerName,p.position,p.ovr,p.height,p.weight,p.hand,p.xfactor,p.salary||0,p.contractDuration||0,p.automatic?'Kyllä':'Ei']);return [h,...rows].map(r=>r.map(csvEscape).join(',')).join('\r\n');}
-function resetToReal(){state.mode='real';state.rounds=32;state.teamCount=32;state.teams=state.teams.length===32?state.teams:makeTeams(32);state.status='setup';state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=null;state.pausedRemaining=null;save();broadcast();}
+function exportCSV(){const h=['Pick','Round','Pick In Round','Team','Participant','Player','Position','OVR','Height','Weight','Hand','Kyvyt','Palkka','Automaattinen varaus','Timestamp'];return [h,...state.picks.map(p=>[p.pickNumber,p.round,p.pickInRound,p.teamName,p.participant,p.playerName,p.position,p.ovr,p.height,p.weight,p.hand,p.xfactor,p.salary||0,p.automatic?'Yes':'No',p.timestamp])].map(r=>r.map(csvEscape).join(',')).join('\r\n');}
+function exportRosters(){const h=['Team','Participant','Pick','Player','Position','OVR','Height','Weight','Hand','Kyvyt','Palkka','Automaattinen varaus'];const rows=[];for(const t of state.teams)for(const p of state.picks.filter(x=>x.teamId===t.id))rows.push([t.name,t.participant,p.pickNumber,p.playerName,p.position,p.ovr,p.height,p.weight,p.hand,p.xfactor,p.salary||0,p.automatic?'Yes':'No']);return [h,...rows].map(r=>r.map(csvEscape).join(',')).join('\r\n');}
+function resetToReal(){
+  // Restore the real-draft configuration saved before practice mode.
+  if(state.mode==='practice' && state.realDraftBackup){
+    const b=state.realDraftBackup;
+    state.teams=b.teams;
+    state.teamCount=b.teamCount;
+    state.rounds=b.rounds;
+    state.timerSeconds=b.timerSeconds;
+    state.picks=b.picks||[];
+  }
+  state.realDraftBackup=null;
+  state.mode='real';state.status='setup';state.round=1;state.pickInRound=1;state.currentTeamId=1;
+  state.picks=[];state.turnStartedAt=null;state.pausedRemaining=null;save();broadcast();
+}
 async function route(req,res){
   const url=new URL(req.url,`http://${req.headers.host||'localhost'}`);
   if(req.method==='GET'&&url.pathname==='/api/state')return json(res,200,publicState());
@@ -110,7 +113,7 @@ async function route(req,res){
     if(!requireAuth(req,res,'commissioner'))return;try{const b=await body(req);if(b.draftName!==undefined)state.draftName=String(b.draftName);if(b.salaryCapCeiling!==undefined){const cap=Number(b.salaryCapCeiling);if(!Number.isSafeInteger(cap)||cap<0)throw new Error('Virheellinen palkkakatto.');if(state.picks.some(p=>teamPayroll(p.teamId)>cap))throw new Error('Nykyinen joukkue ylittää uuden palkkakaton.');state.salaryCapCeiling=cap;}if(b.timerSeconds!==undefined)state.timerSeconds=Math.max(5,Number(b.timerSeconds));if(b.autopickEnabled!==undefined)state.autopickEnabled=!!b.autopickEnabled;if(b.autopickMode!==undefined)state.autopickMode=b.autopickMode;if(Array.isArray(b.autopickPositions))state.autopickPositions=b.autopickPositions;if(b.commissionerPassword)state.commissionerPassword=String(b.commissionerPassword);if(Array.isArray(b.teams)){b.teams.slice(0,32).forEach((t,i)=>{if(t.name!==undefined)state.teams[i].name=String(t.name);if(t.participant!==undefined)state.teams[i].participant=String(t.participant);if(t.code!==undefined&&String(t.code).trim())state.teams[i].code=String(t.code);});}save();broadcast();return json(res,200,{ok:true})}catch(e){return json(res,400,{error:e.message})}
   }
   if(req.method==='POST'&&url.pathname==='/api/draft/start'){
-    if(!requireAuth(req,res,'commissioner'))return;if(!state.players.length)return json(res,400,{error:'Import players first.'});state.status='live';state.mode='real';state.rounds=32;state.teamCount=32;state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=Date.now();state.pausedRemaining=null;save();broadcast();return json(res,200,{ok:true});
+    if(!requireAuth(req,res,'commissioner'))return;if(!state.players.length)return json(res,400,{error:'Import players first.'});if(state.mode==='practice')resetToReal();if(!Number.isInteger(state.teamCount)||state.teamCount<2||state.teamCount>32||state.teams.length<state.teamCount)return json(res,400,{error:'Tarkista joukkuemäärä ja joukkueiden tiedot.'});state.status='live';state.mode='real';state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=Date.now();state.pausedRemaining=null;save();broadcast();return json(res,200,{ok:true});
   }
   if(req.method==='POST'&&url.pathname==='/api/draft/pick'){
     const s=requireAuth(req,res,'team');if(!s)return;try{if(state.status!=='live')throw new Error('Draft is not live.');if(s.role==='team'&&s.teamId!==state.currentTeamId)throw new Error('It is not your team\'s turn.');const b=await body(req);const p=state.players.find(x=>x.id===String(b.playerId));if(!p)throw new Error('Player not found.');recordPick(p,false);save();broadcast();return json(res,200,{ok:true})}catch(e){return json(res,400,{error:e.message})}
@@ -124,7 +127,7 @@ async function route(req,res){
   }
   if(req.method==='POST'&&url.pathname==='/api/draft/force-autopick'){if(!requireAuth(req,res,'commissioner'))return;if(state.status!=='live')return json(res,400,{error:'Draft is not live.'});const p=chooseAutopick();if(!p)return json(res,400,{error:'Ei palkkakattoon mahtuvia vapaita pelaajia.'});recordPick(p,true);save();broadcast();return json(res,200,{ok:true});}
   if(req.method==='POST'&&url.pathname==='/api/practice/start'){
-    if(!requireAuth(req,res,'commissioner'))return;const b=await body(req);const teams=Math.max(2,Math.min(32,Number(b.teams||4)));const rounds=Math.max(1,Math.min(32,Number(b.rounds||3)));state.mode='practice';state.rounds=rounds;state.teamCount=teams;state.teams=state.teams.slice(0,teams);state.timerSeconds=Math.max(5,Number(b.timerSeconds||30));state.status='live';state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=Date.now();state.pausedRemaining=null;save();broadcast();return json(res,200,{ok:true});
+    if(!requireAuth(req,res,'commissioner'))return;const b=await body(req);const teams=Math.max(2,Math.min(32,Number(b.teams||4)));const rounds=Math.max(1,Math.min(32,Number(b.rounds||3)));if(state.mode!=='practice'){state.realDraftBackup={teams:JSON.parse(JSON.stringify(state.teams)),teamCount:state.teamCount,rounds:state.rounds,timerSeconds:state.timerSeconds,picks:JSON.parse(JSON.stringify(state.picks))};}state.mode='practice';state.rounds=rounds;state.teamCount=teams;state.teams=state.realDraftBackup.teams.slice(0,teams).map(t=>({...t}));state.timerSeconds=Math.max(5,Number(b.timerSeconds||30));state.status='live';state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=Date.now();state.pausedRemaining=null;save();broadcast();return json(res,200,{ok:true});
   }
   if(req.method==='POST'&&url.pathname==='/api/mode/real'){if(!requireAuth(req,res,'commissioner'))return;resetToReal();return json(res,200,{ok:true});}
   let file=url.pathname==='/'?'index.html':url.pathname.slice(1);const filePath=path.normalize(path.join(PUBLIC_DIR,file));if(!filePath.startsWith(PUBLIC_DIR))return json(res,404,{error:'Not found'});if(fs.existsSync(filePath)&&fs.statSync(filePath).isFile()){const ext=path.extname(filePath);const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'};res.writeHead(200,{'Content-Type':types[ext]||'application/octet-stream'});return fs.createReadStream(filePath).pipe(res);}return json(res,404,{error:'Not found'});

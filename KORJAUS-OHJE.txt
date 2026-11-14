@@ -1,0 +1,9 @@
+NHL 27 - korjaus 23 joukkueelle
+
+1. Pysayta vanha palvelin (Ctrl+C).
+2. Tee varmuuskopio vanhasta data/state.json-tiedostosta.
+3. Pura tama ZIP uuteen kansioon ja kaynnista npm install ja npm start.
+4. Paketin data/state.json on toimittamasi 23 joukkueen asetustiedosto.
+5. Jos siirrat korjauksen olemassa olevaan kansioon, vaihda vain server.js ja public/app.js; sailyta oma data/state.json.
+
+Korjattu: varsinainen varaus ei pakota joukkuemaaraa 32:een tai kierroksia 32:een. Harjoitustila tallentaa varsinaisen tilan joukkueasetukset ja palauttaa ne.
