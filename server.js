@@ -22,7 +22,7 @@ function defaultState() {
   return {
     draftName:'NHL 27 Fantasy Draft', mode:'real', rounds:32, teamCount:32,
     salaryCapCeiling:95500000, timerSeconds:120, autopickEnabled:true, autopickMode:'highest_ovr',
-    autopickPositions:['C','LW','RW','D','G'], status:'setup', round:1, pickInRound:1,
+    autopickPositions:['KH','VL','OL','VP','OP','MV'], status:'setup', round:1, pickInRound:1,
     currentTeamId:1, turnStartedAt:null, pausedRemaining:null, players:[], picks:[],
     teams:makeTeams(32), commissionerPassword:DEFAULT_COMMISSIONER_PASSWORD,
     practiceDefaults:{rounds:3,teams:4,timerSeconds:30}
