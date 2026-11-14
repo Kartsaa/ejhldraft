@@ -62,8 +62,49 @@ function backupSnapshot(label='auto'){
 function save(){writeAtomic(STATE_FILE,JSON.stringify(state,null,2));backupSnapshot();}
 const DISCORD_URL=process.env.DISCORD_WEBHOOK_URL||'';
 let ROLE_IDS={};try{ROLE_IDS=JSON.parse(process.env.DISCORD_ROLE_IDS||'{}')}catch(e){console.error('Invalid DISCORD_ROLE_IDS JSON:',e.message)}
-function discord(message,teamId){if(!DISCORD_URL)return;const role=teamId&&String(ROLE_IDS[teamId]||'');const mention=/^\d{15,22}$/.test(role)?`<@&${role}> `:'';const allowed_mentions=mention?{parse:[],roles:[role]}:{parse:[]};fetch(DISCORD_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:(mention+message).slice(0,1900),allowed_mentions})}).then(r=>{if(!r.ok)console.error('Discord webhook HTTP',r.status)}).catch(e=>console.error('Discord webhook error:',e.message));}
-function announcePick(){const p=state.picks.at(-1);if(!p||state.mode==='practice')return;discord(`${p.automatic?'🤖 Automaattinen varaus':'🏒 Uusi varaus'} #${p.pickNumber}: ${p.teamName} — ${p.playerName} (${p.position}, KOK ${p.ovr})`);if(state.status==='complete')discord('🏁 Draft on päättynyt!');else if(state.status==='live'){const t=currentTeam();if(t)discord(`⏰ Varausvuoro alkaa: ${t.name} — kierros ${state.round}`,t.id);}}
+// Discord: one announcement for the next three picks, respecting snake order.
+function discord(message,teamIds=[]){
+ if(!DISCORD_URL)return;
+ const ids=(Array.isArray(teamIds)?teamIds:[teamIds]).map(id=>String(ROLE_IDS[id]||'')).filter(id=>/^\d{15,22}$/.test(id));
+ const unique=[...new Set(ids)];
+ const allowed_mentions={parse:[],roles:unique};
+ fetch(DISCORD_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:message.slice(0,1900),allowed_mentions})})
+ .then(r=>{if(!r.ok)console.error('Discord webhook HTTP',r.status)})
+ .catch(e=>console.error('Discord webhook error:',e.message));
+}
+function upcomingPicks(count=3){
+ const total=state.teamCount*state.rounds;
+ const next=state.picks.length;
+ const result=[];
+ for(let index=next;index<Math.min(total,next+count);index++){
+  const round=Math.floor(index/state.teamCount)+1;
+  const pickInRound=index%state.teamCount;
+  const teamId=orderForRound(round)[pickInRound];
+  const team=state.teams.find(t=>t.id===teamId);
+  if(team)result.push({number:index+1,round,team});
+ }
+ return result;
+}
+function announceUpcoming(){
+ if(state.mode==='practice'||state.status!=='live')return;
+ const upcoming=upcomingPicks(3);
+ if(!upcoming.length)return;
+ const roles=[];
+ const lines=upcoming.map((p,i)=>{
+  const role=String(ROLE_IDS[p.team.id]||'');
+  const mention=/^\d{15,22}$/.test(role)?` <@&${role}>`:'';
+  if(mention)roles.push(p.team.id);
+  return `${i===0?'🟢 Nyt':i===1?'🟡 Seuraavana':'🟠 Kolmantena'}: #${p.number} (kierros ${p.round}) — ${p.team.name}${mention}`;
+ });
+ discord(`📣 **Seuraavat 3 varausvuoroa**\n${lines.join('\n')}`,roles);
+}
+function announcePick(){
+ const p=state.picks.at(-1);
+ if(!p||state.mode==='practice')return;
+ discord(`${p.automatic?'🤖 Automaattinen varaus':'🏒 Uusi varaus'} #${p.pickNumber}: ${p.teamName} — ${p.playerName} (${p.position}, KOK ${p.ovr})`);
+ if(state.status==='complete')discord('🏁 Draft on päättynyt!');
+ else announceUpcoming();
+}
 
 function publicState(){
   let remaining=null;
@@ -159,7 +200,7 @@ async function route(req,res){
     if(!requireAuth(req,res,'commissioner'))return;try{const b=await body(req);if(b.draftName!==undefined)state.draftName=String(b.draftName);if(b.salaryCapCeiling!==undefined){const cap=Number(b.salaryCapCeiling);if(!Number.isSafeInteger(cap)||cap<0)throw new Error('Virheellinen palkkakatto.');if(state.picks.some(p=>teamPayroll(p.teamId)>cap))throw new Error('Nykyinen joukkue ylittää uuden palkkakaton.');state.salaryCapCeiling=cap;}if(b.timerSeconds!==undefined)state.timerSeconds=Math.max(5,Number(b.timerSeconds));if(b.autopickEnabled!==undefined)state.autopickEnabled=!!b.autopickEnabled;if(b.autopickMode!==undefined)state.autopickMode=b.autopickMode;if(Array.isArray(b.autopickPositions))state.autopickPositions=b.autopickPositions;if(b.commissionerPassword)state.commissionerPassword=String(b.commissionerPassword);if(Array.isArray(b.teams)){b.teams.slice(0,32).forEach((t,i)=>{if(t.name!==undefined)state.teams[i].name=String(t.name);if(t.participant!==undefined)state.teams[i].participant=String(t.participant);if(t.code!==undefined&&String(t.code).trim())state.teams[i].code=String(t.code);});}save();broadcast();return json(res,200,{ok:true})}catch(e){return json(res,400,{error:e.message})}
   }
   if(req.method==='POST'&&url.pathname==='/api/draft/start'){
-    if(!requireAuth(req,res,'commissioner'))return;if(!state.players.length)return json(res,400,{error:'Import players first.'});if(state.mode==='practice')resetToReal();if(!Number.isInteger(state.teamCount)||state.teamCount<2||state.teamCount>32||state.teams.length<state.teamCount)return json(res,400,{error:'Tarkista joukkuemäärä ja joukkueiden tiedot.'});state.status='live';state.mode='real';state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=Date.now();state.pausedRemaining=null;save();broadcast();discord('🚀 Draft alkaa!');discord(`⏰ Varausvuoro alkaa: ${currentTeam()?.name||'Joukkue 1'}`,state.currentTeamId);return json(res,200,{ok:true});
+    if(!requireAuth(req,res,'commissioner'))return;if(!state.players.length)return json(res,400,{error:'Import players first.'});if(state.mode==='practice')resetToReal();if(!Number.isInteger(state.teamCount)||state.teamCount<2||state.teamCount>32||state.teams.length<state.teamCount)return json(res,400,{error:'Tarkista joukkuemäärä ja joukkueiden tiedot.'});state.status='live';state.mode='real';state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=Date.now();state.pausedRemaining=null;save();broadcast();discord('🚀 Draft alkaa!');announceUpcoming();return json(res,200,{ok:true});
   }
   if(req.method==='POST'&&url.pathname==='/api/draft/pick'){
     const s=requireAuth(req,res,'team');if(!s)return;try{if(state.status!=='live')throw new Error('Draft is not live.');if(s.role==='team'&&s.teamId!==state.currentTeamId)throw new Error('It is not your team\'s turn.');const b=await body(req);const p=state.players.find(x=>x.id===String(b.playerId));if(!p)throw new Error('Player not found.');recordPick(p,false);save();broadcast();announcePick();return json(res,200,{ok:true})}catch(e){return json(res,400,{error:e.message})}
