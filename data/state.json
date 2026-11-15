@@ -1,8 +1,8 @@
 {
   "draftName": "NHL 27 Fantasy Draft",
   "mode": "real",
-  "rounds": 22,
-  "teamCount": 23,
+  "rounds": 24,
+  "teamCount": 22,
   "salaryCapCeiling": 104000000,
   "timerSeconds": 65,
   "autopickEnabled": true,
@@ -11974,126 +11974,120 @@
     },
     {
       "id": 3,
-      "name": "Allen Americans",
-      "participant": "temmi79",
-      "code": "OAYDONIU"
-    },
-    {
-      "id": 4,
       "name": "Team Sir_sniper",
       "participant": "sir_sniper",
       "code": "DEJTLLEQ"
     },
     {
-      "id": 5,
+      "id": 4,
       "name": "Tahoe Knight Monsters",
       "participant": "Nurkkari Nubious",
       "code": "TMLUDPKK"
     },
     {
-      "id": 6,
+      "id": 5,
       "name": "Tucson Roadrunners",
       "participant": "kilpigona",
       "code": "XDEPDHEV"
     },
     {
-      "id": 7,
+      "id": 6,
       "name": "Los Angeles Kings",
       "participant": "Judezi",
       "code": "ASICWARB"
     },
     {
-      "id": 8,
+      "id": 7,
       "name": "Team Anttiizzh",
       "participant": "Anttiizzh",
       "code": "YFAZREWD"
     },
     {
-      "id": 9,
+      "id": 8,
       "name": "San Diego Gulls",
       "participant": "OssiAlbatrossi",
       "code": "WLUHLEIN"
     },
     {
-      "id": 10,
+      "id": 9,
       "name": "WBS Penguins",
       "participant": "Villielain_57",
       "code": "VOOTPABI"
     },
     {
-      "id": 11,
+      "id": 10,
       "name": "Utah Mammoth",
       "participant": "Zigomani",
       "code": "YWMKWTBE"
     },
     {
-      "id": 12,
+      "id": 11,
       "name": "Florida Panthers",
       "participant": "Linksutin",
       "code": "AZUCENBY"
     },
     {
-      "id": 13,
+      "id": 12,
       "name": "Wheeling Nailers",
       "participant": "Mibo",
       "code": "WHEOLEZM"
     },
     {
-      "id": 14,
+      "id": 13,
       "name": "Team Gods_Will2",
       "participant": "Gods_Will2",
       "code": "OWXAQMAV"
     },
     {
-      "id": 15,
+      "id": 14,
       "name": "Team PyryTheBig",
       "participant": "PyryTheBig",
       "code": "TSPEQZLH"
     },
     {
-      "id": 16,
+      "id": 15,
       "name": "Rapid City Rush",
       "participant": "xSAPE96",
       "code": "YWTJHCXV"
     },
     {
-      "id": 17,
+      "id": 16,
       "name": "Haukat",
       "participant": "Kartsa",
       "code": "CBHBEULD"
     },
     {
-      "id": 18,
+      "id": 17,
       "name": "New York Rangers",
       "participant": "Alepan Kangaskassi",
       "code": "GYEVEMZV"
     },
     {
-      "id": 19,
+      "id": 18,
       "name": "Chicago Blackhawks",
       "participant": "vilperi-90",
       "code": "GYEVEMZV"
     },
     {
-      "id": 20,
+      "id": 19,
       "name": "Edmonton Oilers",
       "participant": "Ekukola",
       "code": "ZMVHSXQK"
     },
     {
-      "id": 21,
+      "id": 20,
       "name": "Orlando Solar Bears",
       "participant": "haukkumaukku",
       "code": "ZMVHSXQK"
     },
     {
-      "id": 22,
+      "id": 21,
       "name": "Toronto Maple Leafs",
       "participant": "moro",
       "code": "MSQVRREB"
     },
     {
-      "id": 23,
+      "id": 22,
       "name": "Pittsburgh Penguins",
       "participant": "Qurr3",
       "code": "DINDWCSD"
