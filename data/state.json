@@ -4,7 +4,7 @@
   "rounds": 22,
   "teamCount": 23,
   "salaryCapCeiling": 104000000,
-  "timerSeconds": 60,
+  "timerSeconds": 65,
   "autopickEnabled": true,
   "autopickMode": "highest_ovr",
   "autopickPositions": [
