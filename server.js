@@ -159,7 +159,7 @@ async function route(req,res){
 let data=null;const out=document.getElementById('out');const apply=document.getElementById('apply');
 document.getElementById('file').onchange=()=>{data=null;apply.disabled=true;out.textContent='';};
 async function request(preview){const f=document.getElementById('file').files[0];if(!f)throw Error('Valitse Excel-tiedosto.');if(!data){const bytes=new Uint8Array(await f.arrayBuffer());let str='';for(let i=0;i<bytes.length;i+=8192)str+=String.fromCharCode(...bytes.subarray(i,i+8192));data=btoa(str);}const r=await fetch('/api/contracts/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data,preview})});const x=await r.json();if(!r.ok)throw Error(x.error||'Päivitys epäonnistui');return x;}
-document.getElementById('preview').onclick=async()=>{try{const x=await request(true);out.textContent='Excelissä: '+x.excelPlayers+'\nNykyisiä pelaajia: '+x.currentPlayers+'\nOsumia: '+x.matched+'\nIlman osumaa: '+x.missing;apply.disabled=false;}catch(e){out.textContent=e.message;apply.disabled=true;}};
+document.getElementById('preview').onclick=async()=>{try{const x=await request(true);out.textContent='Excelissä: '+x.excelPlayers+'\\nNykyisiä pelaajia: '+x.currentPlayers+'\\nOsumia: '+x.matched+'\\nIlman osumaa: '+x.missing;apply.disabled=false;}catch(e){out.textContent=e.message;apply.disabled=true;}};
 apply.onclick=async()=>{if(!confirm('Päivitetäänkö sopimusten kestot? Varmuuskopio tehdään ensin.'))return;try{const x=await request(false);out.textContent='Valmis! Päivitetty '+x.updated+' pelaajaa. Päivitä draft-sivu.';apply.disabled=true;}catch(e){out.textContent=e.message;}};
 </script></body></html>`);
   }
