@@ -60,6 +60,28 @@ function backupSnapshot(label='auto'){
  for(const old of files.slice(100))fs.unlinkSync(path.join(BACKUP_DIR,old));
 }
 function save(){writeAtomic(STATE_FILE,JSON.stringify(state,null,2));backupSnapshot();}
+
+// One-time setup migration for the NEW 24-round draft.
+// Never modify an active draft or any existing picks.
+function migrateNewDraft24(){
+  if(state.mode!=='real'||state.status!=='setup'||state.picks.length!==0)return;
+  const allen=state.teams.findIndex(t=>String(t.name).trim().toLowerCase()==='allen americans');
+  if(allen<0)return; // Already migrated (or this is a different draft).
+  if(state.teamCount!==23||state.teams.length!==23)throw new Error('24 kierroksen muutos vaatii 23 joukkueen uuden draftin.');
+  backupSnapshot('before-24-round-migration');
+  state.teams=state.teams.filter((_,i)=>i!==allen).map((t,i)=>({...t,id:i+1}));
+  state.teamCount=22;
+  state.rounds=24;
+  state.round=1;
+  state.pickInRound=1;
+  state.currentTeamId=1;
+  state.turnStartedAt=null;
+  state.pausedRemaining=null;
+  save();
+  console.log('Uusi draft: 22 joukkuetta, 24 kierrosta; Allen Americans poistettu.');
+}
+migrateNewDraft24();
+
 const DISCORD_URL=process.env.DISCORD_WEBHOOK_URL||'';
 let ROLE_IDS={};try{ROLE_IDS=JSON.parse(process.env.DISCORD_ROLE_IDS||'{}')}catch(e){console.error('Invalid DISCORD_ROLE_IDS JSON:',e.message)}
 function discord(message,teamId){if(!DISCORD_URL)return;const role=teamId&&String(ROLE_IDS[teamId]||'');const mention=/^\d{15,22}$/.test(role)?`<@&${role}> `:'';const allowed_mentions=mention?{parse:[],roles:[role]}:{parse:[]};fetch(DISCORD_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:(mention+message).slice(0,1900),allowed_mentions})}).then(r=>{if(!r.ok)console.error('Discord webhook HTTP',r.status)}).catch(e=>console.error('Discord webhook error:',e.message));}
@@ -99,7 +121,36 @@ function importRows(rows){const players=rows.map(normalizePlayer).filter(p=>p.na
 function draftedIds(){return new Set(state.picks.map(p=>p.playerId));}
 function orderForRound(round,teamCount=state.teamCount){const a=Array.from({length:teamCount},(_,i)=>i+1);return round%2===1?a:a.reverse();}
 function currentTeam(){return state.teams.find(t=>t.id===state.currentTeamId);}
-function chooseAutopick(){let available=state.players.filter(p=>!draftedIds().has(p.id));if(!available.length)return null;available=available.filter(p=>fitsCap(p,state.currentTeamId));if(!available.length)return null;if(state.autopickMode==='positions'){const allowed=new Set(state.autopickPositions);const preferred=available.filter(p=>allowed.has(p.position));if(preferred.length)available=preferred;}return available.sort((a,b)=>(b.ovr-a.ovr)||a.name.localeCompare(b.name))[0];}
+// Automaattivarausten kokoonpanorajat: 14 hyökkääjää, 8 puolustajaa, 2 maalivahtia.
+const AUTOPICK_LIMITS={F:14,D:8,G:2};
+function positionGroup(position){if(['KH','VL','OL'].includes(position))return 'F';if(['VP','OP'].includes(position))return 'D';if(position==='MV')return 'G';return null;}
+function chooseAutopick(){
+  const teamId=state.currentTeamId;
+  const own=state.picks.filter(p=>p.teamId===teamId);
+  const counts={F:0,D:0,G:0};
+  for(const pick of own){const group=positionGroup(pick.position);if(group)counts[group]++;}
+  const remaining={F:Math.max(0,14-counts.F),D:Math.max(0,8-counts.D),G:Math.max(0,2-counts.G)};
+  if(!Object.values(remaining).some(Boolean))return null;
+  const available=state.players.filter(p=>!draftedIds().has(p.id)&&positionGroup(p.position)&&remaining[positionGroup(p.position)]>0);
+  const budget=state.salaryCapCeiling-teamPayroll(teamId);
+  // Varaa palkkabudjettia myös jäljellä oleville pelipaikoille.
+  // Käytä kunkin ryhmän halvimpia pelaajia toteutettavuuden tarkistamiseen.
+  const byGroup={F:[],D:[],G:[]};
+  for(const p of available)byGroup[positionGroup(p.position)].push(p);
+  for(const group of Object.keys(byGroup))byGroup[group].sort((a,b)=>(Number(a.salary)||0)-(Number(b.salary)||0));
+  const feasible=available.filter(candidate=>{
+    let cost=Number(candidate.salary)||0;
+    const needed={...remaining};needed[positionGroup(candidate.position)]--;
+    for(const group of ['F','D','G']){
+      const others=byGroup[group].filter(p=>p.id!==candidate.id);
+      if(others.length<needed[group])return false;
+      for(let i=0;i<needed[group];i++)cost+=Number(others[i].salary)||0;
+    }
+    return cost<=budget;
+  });
+  // Älä ohita kokoonpanorajoja tai palkkakattoa, vaikka sopivaa varausta ei löytyisi.
+  return feasible.sort((a,b)=>(b.ovr-a.ovr)||a.name.localeCompare(b.name))[0]||null;
+}
 function advance(){const total=state.rounds*state.teamCount;const pickNumber=state.picks.length;if(pickNumber>=total){state.status='complete';state.turnStartedAt=null;state.pausedRemaining=null;return;}state.pickInRound++;if(state.pickInRound>state.teamCount){state.round++;state.pickInRound=1;}state.currentTeamId=orderForRound(state.round)[state.pickInRound-1];state.turnStartedAt=Date.now();state.pausedRemaining=null;}
 function recordPick(player,automatic=false){if(!player)throw new Error('No available player.');if(draftedIds().has(player.id))throw new Error('Pelaaja on jo varattu.');if(!fitsCap(player,state.currentTeamId))throw new Error('Palkkakatto ylittyisi tällä varauksella.');const team=currentTeam();if(!team)throw new Error('Current team not found.');state.picks.push({pickNumber:state.picks.length+1,round:state.round,pickInRound:state.pickInRound,teamId:team.id,teamName:team.name,participant:team.participant,playerId:player.id,playerName:player.name,position:player.position,ovr:player.ovr,height:player.height,weight:player.weight,hand:player.hand,xfactor:player.xfactor,salary:player.salary||0,contractDuration:Number(player.contractDuration??player.contractYears??0)||0,automatic,timestamp:new Date().toISOString()});advance();}
 function maybeAutopick(){if(state.status!=='live'||!state.autopickEnabled||!state.turnStartedAt)return;if(Date.now()-state.turnStartedAt<state.timerSeconds*1000)return;const p=chooseAutopick();if(p){recordPick(p,true);save();broadcast();announcePick();}else{state.status='paused';state.pausedRemaining=0;state.turnStartedAt=null;save();broadcast();}}
