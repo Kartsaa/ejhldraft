@@ -61,50 +61,9 @@ function backupSnapshot(label='auto'){
 }
 function save(){writeAtomic(STATE_FILE,JSON.stringify(state,null,2));backupSnapshot();}
 const DISCORD_URL=process.env.DISCORD_WEBHOOK_URL||'';
-let USER_IDS={};try{USER_IDS=JSON.parse(process.env.DISCORD_USER_IDS||'{}');if(!USER_IDS||typeof USER_IDS!=='object'||Array.isArray(USER_IDS))throw new Error('Expected a JSON object')}catch(e){console.error('Invalid DISCORD_USER_IDS JSON:',e.message);USER_IDS={}}
-// Discord: one announcement for the next three picks, respecting snake order.
-function discord(message,teamIds=[]){
- if(!DISCORD_URL)return;
- const ids=(Array.isArray(teamIds)?teamIds:[teamIds]).map(id=>String(USER_IDS[id]||'')).filter(id=>/^\d{15,22}$/.test(id));
- const unique=[...new Set(ids)];
- const allowed_mentions={parse:[],users:unique};
- fetch(DISCORD_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:message.slice(0,1900),allowed_mentions})})
- .then(r=>{if(!r.ok)console.error('Discord webhook HTTP',r.status)})
- .catch(e=>console.error('Discord webhook error:',e.message));
-}
-function upcomingPicks(count=3){
- const total=state.teamCount*state.rounds;
- const next=state.picks.length;
- const result=[];
- for(let index=next;index<Math.min(total,next+count);index++){
-  const round=Math.floor(index/state.teamCount)+1;
-  const pickInRound=index%state.teamCount;
-  const teamId=orderForRound(round)[pickInRound];
-  const team=state.teams.find(t=>t.id===teamId);
-  if(team)result.push({number:index+1,round,team});
- }
- return result;
-}
-function announceUpcoming(){
- if(state.mode==='practice'||state.status!=='live')return;
- const upcoming=upcomingPicks(3);
- if(!upcoming.length)return;
- const users=[];
- const lines=upcoming.map((p,i)=>{
-  const user=String(USER_IDS[p.team.id]||'');
-  const mention=/^\d{15,22}$/.test(user)?` <@${user}>`:'';
-  if(mention)users.push(p.team.id);
-  return `${i===0?'🟢 Nyt':i===1?'🟡 Seuraavana':'🟠 Kolmantena'}: #${p.number} (kierros ${p.round}) — ${p.team.name}${mention}`;
- });
- discord(`📣 **Seuraavat 3 varausvuoroa**\n${lines.join('\n')}`,users);
-}
-function announcePick(){
- const p=state.picks.at(-1);
- if(!p||state.mode==='practice')return;
- discord(`${p.automatic?'🤖 Automaattinen varaus':'🏒 Uusi varaus'} #${p.pickNumber}: ${p.teamName} — ${p.playerName} (${p.position}, KOK ${p.ovr})`);
- if(state.status==='complete')discord('🏁 Draft on päättynyt!');
- else announceUpcoming();
-}
+let ROLE_IDS={};try{ROLE_IDS=JSON.parse(process.env.DISCORD_ROLE_IDS||'{}')}catch(e){console.error('Invalid DISCORD_ROLE_IDS JSON:',e.message)}
+function discord(message,teamId){if(!DISCORD_URL)return;const role=teamId&&String(ROLE_IDS[teamId]||'');const mention=/^\d{15,22}$/.test(role)?`<@&${role}> `:'';const allowed_mentions=mention?{parse:[],roles:[role]}:{parse:[]};fetch(DISCORD_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:(mention+message).slice(0,1900),allowed_mentions})}).then(r=>{if(!r.ok)console.error('Discord webhook HTTP',r.status)}).catch(e=>console.error('Discord webhook error:',e.message));}
+function announcePick(){const p=state.picks.at(-1);if(!p||state.mode==='practice')return;discord(`${p.automatic?'🤖 Automaattinen varaus':'🏒 Uusi varaus'} #${p.pickNumber}: ${p.teamName} — ${p.playerName} (${p.position}, KOK ${p.ovr})`);if(state.status==='complete')discord('🏁 Draft on päättynyt!');else if(state.status==='live'){const t=currentTeam();if(t)discord(`⏰ Varausvuoro alkaa: ${t.name} — kierros ${state.round}`,t.id);}}
 
 function publicState(){
   let remaining=null;
@@ -132,7 +91,7 @@ function parseSalary(value){
 function normalizePlayer(p,i){
   const position=String(p.Pelipaikka??p.Position??p.position??p.Pos??'').trim().toUpperCase();
   const rawSalary=p.Palkka??p.Salary??p['Cap Hit']??p.CapHit??p.salary??'';
-  return {id:String(p.ID??p.Id??p.id??`p-${i+1}`),name:String(p.Nimi??p.Name??p.name??p.Player??p.player??'').trim(),position,ovr:Number(p.KOK??p.OVR??p.Ovr??p.ovr??0),height:String(p.Pituus??p.Height??p.height??'').trim(),weight:String(p.Paino??p.Weight??p.weight??'').trim(),hand:String(p['Kätisyys']??p.Katisyys??p.Hand??p.Handedness??p.handedness??p.hand??'').trim().toUpperCase(),xfactor:String(p.Kyvyt??p.XFactor??p['X-Factor']??p.xfactor??p.Ability??p['X Factor']??'').trim(),salary:parseSalary(rawSalary)};
+  return {id:String(p.ID??p.Id??p.id??`p-${i+1}`),name:String(p.Nimi??p.Name??p.name??p.Player??p.player??'').trim(),position,ovr:Number(p.KOK??p.OVR??p.Ovr??p.ovr??0),height:String(p.Pituus??p.Height??p.height??'').trim(),weight:String(p.Paino??p.Weight??p.weight??'').trim(),hand:String(p['Kätisyys']??p.Katisyys??p.Hand??p.Handedness??p.handedness??p.hand??'').trim().toUpperCase(),xfactor:String(p.Kyvyt??p.XFactor??p['X-Factor']??p.xfactor??p.Ability??p['X Factor']??'').trim(),salary:parseSalary(rawSalary),contractYears:Number(p['Sopimuksen kesto']??p['Sopimuksen Kesto']??p.contractYears??p.contractLength??0)||0};
 }
 function teamPayroll(teamId){return state.picks.filter(p=>p.teamId===teamId).reduce((sum,p)=>sum+(Number(p.salary)||0),0);}
 function fitsCap(player,teamId){return teamPayroll(teamId)+(Number(player.salary)||0)<=state.salaryCapCeiling;}
@@ -193,6 +152,49 @@ async function route(req,res){
   }
   if(req.method==='POST'&&url.pathname==='/api/logout'){const s=session(req);if(s)sessions.delete(cookies(req).nhl27sid);res.setHeader('Set-Cookie','nhl27sid=; Max-Age=0; Path=/');return json(res,200,{ok:true});}
   if(req.method==='GET'&&url.pathname==='/api/me'){const s=session(req);return json(res,200,s?{loggedIn:true,...s}:{loggedIn:false});}
+  if(req.method==='GET'&&url.pathname==='/contracts-tool'){
+    if(!requireAuth(req,res,'commissioner'))return;
+    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});
+    return res.end(`<!doctype html><html lang="fi"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sopimusten päivitys</title><body style="font:16px system-ui;max-width:650px;margin:40px auto;padding:16px"><h1>Sopimuksen kestojen päivitys</h1><p>Päivittää vain nykyisten pelaajien sopimusten kestot. Joukkueet ja varaukset säilyvät.</p><input id="file" type="file" accept=".xlsx,.xls"><p><button id="preview">Tarkista osumat</button> <button id="apply" disabled>Päivitä sopimukset</button></p><pre id="out" style="white-space:pre-wrap"></pre><script>
+let data=null;const out=document.getElementById('out');const apply=document.getElementById('apply');
+document.getElementById('file').onchange=()=>{data=null;apply.disabled=true;out.textContent='';};
+async function request(preview){const f=document.getElementById('file').files[0];if(!f)throw Error('Valitse Excel-tiedosto.');if(!data){const bytes=new Uint8Array(await f.arrayBuffer());let str='';for(let i=0;i<bytes.length;i+=8192)str+=String.fromCharCode(...bytes.subarray(i,i+8192));data=btoa(str);}const r=await fetch('/api/contracts/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data,preview})});const x=await r.json();if(!r.ok)throw Error(x.error||'Päivitys epäonnistui');return x;}
+document.getElementById('preview').onclick=async()=>{try{const x=await request(true);out.textContent='Excelissä: '+x.excelPlayers+'\nNykyisiä pelaajia: '+x.currentPlayers+'\nOsumia: '+x.matched+'\nIlman osumaa: '+x.missing;apply.disabled=false;}catch(e){out.textContent=e.message;apply.disabled=true;}};
+apply.onclick=async()=>{if(!confirm('Päivitetäänkö sopimusten kestot? Varmuuskopio tehdään ensin.'))return;try{const x=await request(false);out.textContent='Valmis! Päivitetty '+x.updated+' pelaajaa. Päivitä draft-sivu.';apply.disabled=true;}catch(e){out.textContent=e.message;}};
+</script></body></html>`);
+  }
+  // Update only contract lengths from uploaded Excel, preserving teams, picks and player IDs.
+  if(req.method==='POST'&&url.pathname==='/api/contracts/update'){
+    if(!requireAuth(req,res,'commissioner'))return;
+    try{
+      const b=await body(req);
+      const wb=XLSX.read(Buffer.from(b.data,'base64'),{type:'buffer'});
+      const sheet=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
+      const key=(name,pos)=>String(name).trim().toLocaleLowerCase('fi')+'|'+String(pos).trim().toUpperCase();
+      const lookup=new Map();
+      for(const row of rows){
+        const name=row.Nimi??row.Name??row.name;
+        const pos=row.Pelipaikka??row.Position??row.position;
+        const raw=row['Sopimuksen kesto']??row['Sopimuksen Kesto'];
+        if(!name||!pos||raw===''||raw===null||raw===undefined)continue;
+        const years=Number(raw);
+        if(!Number.isInteger(years)||years<0||years>30)throw new Error('Virheellinen sopimuksen kesto: '+name);
+        const k=key(name,pos);
+        if(lookup.has(k))throw new Error('Excelissä on sama nimi ja pelipaikka kahdesti: '+name);
+        lookup.set(k,years);
+      }
+      if(!lookup.size)throw new Error('Sopimuksen kesto -saraketta ei löytynyt tai se on tyhjä.');
+      const matched=state.players.filter(p=>lookup.has(key(p.name,p.position))).length;
+      if(!matched)throw new Error('Yhtään nykyistä pelaajaa ei löytynyt Excelistä.');
+      const missing=state.players.length-matched;
+      if(b.preview===true)return json(res,200,{ok:true,preview:true,matched,missing,excelPlayers:lookup.size,currentPlayers:state.players.length});
+      backupSnapshot('before-contract-update');
+      state.players=state.players.map(p=>lookup.has(key(p.name,p.position))?{...p,contractYears:lookup.get(key(p.name,p.position))}:p);
+      save();broadcast();
+      return json(res,200,{ok:true,updated:matched,missing,excelPlayers:lookup.size,currentPlayers:state.players.length});
+    }catch(e){return json(res,400,{error:e.message});}
+  }
   if(req.method==='POST'&&url.pathname==='/api/import'){
     if(!requireAuth(req,res,'commissioner'))return;try{const b=await body(req);const wb=XLSX.read(Buffer.from(b.data,'base64'),{type:'buffer'});const sheet=wb.Sheets[wb.SheetNames[0]];return json(res,200,{ok:true,count:importRows(XLSX.utils.sheet_to_json(sheet,{defval:''}))})}catch(e){return json(res,400,{error:e.message})}
   }
@@ -200,7 +202,7 @@ async function route(req,res){
     if(!requireAuth(req,res,'commissioner'))return;try{const b=await body(req);if(b.draftName!==undefined)state.draftName=String(b.draftName);if(b.salaryCapCeiling!==undefined){const cap=Number(b.salaryCapCeiling);if(!Number.isSafeInteger(cap)||cap<0)throw new Error('Virheellinen palkkakatto.');if(state.picks.some(p=>teamPayroll(p.teamId)>cap))throw new Error('Nykyinen joukkue ylittää uuden palkkakaton.');state.salaryCapCeiling=cap;}if(b.timerSeconds!==undefined)state.timerSeconds=Math.max(5,Number(b.timerSeconds));if(b.autopickEnabled!==undefined)state.autopickEnabled=!!b.autopickEnabled;if(b.autopickMode!==undefined)state.autopickMode=b.autopickMode;if(Array.isArray(b.autopickPositions))state.autopickPositions=b.autopickPositions;if(b.commissionerPassword)state.commissionerPassword=String(b.commissionerPassword);if(Array.isArray(b.teams)){b.teams.slice(0,32).forEach((t,i)=>{if(t.name!==undefined)state.teams[i].name=String(t.name);if(t.participant!==undefined)state.teams[i].participant=String(t.participant);if(t.code!==undefined&&String(t.code).trim())state.teams[i].code=String(t.code);});}save();broadcast();return json(res,200,{ok:true})}catch(e){return json(res,400,{error:e.message})}
   }
   if(req.method==='POST'&&url.pathname==='/api/draft/start'){
-    if(!requireAuth(req,res,'commissioner'))return;if(!state.players.length)return json(res,400,{error:'Import players first.'});if(state.mode==='practice')resetToReal();if(!Number.isInteger(state.teamCount)||state.teamCount<2||state.teamCount>32||state.teams.length<state.teamCount)return json(res,400,{error:'Tarkista joukkuemäärä ja joukkueiden tiedot.'});state.status='live';state.mode='real';state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=Date.now();state.pausedRemaining=null;save();broadcast();discord('🚀 Draft alkaa!');announceUpcoming();return json(res,200,{ok:true});
+    if(!requireAuth(req,res,'commissioner'))return;if(!state.players.length)return json(res,400,{error:'Import players first.'});if(state.mode==='practice')resetToReal();if(!Number.isInteger(state.teamCount)||state.teamCount<2||state.teamCount>32||state.teams.length<state.teamCount)return json(res,400,{error:'Tarkista joukkuemäärä ja joukkueiden tiedot.'});state.status='live';state.mode='real';state.round=1;state.pickInRound=1;state.currentTeamId=1;state.picks=[];state.turnStartedAt=Date.now();state.pausedRemaining=null;save();broadcast();discord('🚀 Draft alkaa!');discord(`⏰ Varausvuoro alkaa: ${currentTeam()?.name||'Joukkue 1'}`,state.currentTeamId);return json(res,200,{ok:true});
   }
   if(req.method==='POST'&&url.pathname==='/api/draft/pick'){
     const s=requireAuth(req,res,'team');if(!s)return;try{if(state.status!=='live')throw new Error('Draft is not live.');if(s.role==='team'&&s.teamId!==state.currentTeamId)throw new Error('It is not your team\'s turn.');const b=await body(req);const p=state.players.find(x=>x.id===String(b.playerId));if(!p)throw new Error('Player not found.');recordPick(p,false);save();broadcast();announcePick();return json(res,200,{ok:true})}catch(e){return json(res,400,{error:e.message})}
